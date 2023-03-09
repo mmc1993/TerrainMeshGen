@@ -9,6 +9,8 @@ namespace mmc
         [System.Serializable]
         public struct InParam_t
         {
+            public Color32 EdgeColor;
+
             public Vector2 MapOrigin;
             public Vector2 MapLnegth;
             public Vector2 TileSize;
@@ -20,7 +22,8 @@ namespace mmc
         [System.Serializable]
         public struct OutParam_t
         {
-
+            public List<Mathm.Line2D> MeshEdges;
+            public List<Vector2[]>    MeshLines;
         }
         public OutParam_t OutParam;
 
