@@ -14,7 +14,9 @@ namespace mmc
     {
         private TerrainMeshGen Target => target as TerrainMeshGen;
 
-        struct JobGenMeshEdge : IJobParallelFor
+
+        //  Éú³ÉMesh±ßÔµ
+        struct JobCutlineGen : IJobParallelFor
         {
             [ReadOnly]
             public NativeArray<UnsafeList<float3>> AllMeshEdge;
@@ -104,7 +106,6 @@ namespace mmc
             }
         }
 
-
         public override void OnInspectorGUI()
         {
             base.OnInspectorGUI();
@@ -160,7 +161,7 @@ namespace mmc
                 );
             }
 
-            new JobGenMeshEdge()
+            new JobCutlineGen()
             {
                 AllMeshEdge = allMeshEdge,
                 OutMeshEdge = outMeshEdge,
