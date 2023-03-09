@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Mathematics;
 
 namespace mmc
 {
@@ -404,14 +405,12 @@ namespace mmc
             return index >= 0 ? index : (length + index) % length;
         }
 
-        public static void Edges2LinesHead(List<Line2D> edges, List<Vector2[]> lines)
+        public static bool Float3Equal(float3 a, float3 b)
         {
-
-        }
-
-        public static void Edges2LinesFull(List<Line2D> edges, List<Vector2[]> lines)
-        {
-
+            var diff = math.abs(a - b);
+            return diff.x < math.EPSILON
+                && diff.y < math.EPSILON
+                && diff.z < math.EPSILON;
         }
 
         public static bool Color32Equal(Color32 a, Color32 b)

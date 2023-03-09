@@ -5,6 +5,7 @@ using UnityEngine.UI;
 using UnityEngine;
 using System.Net;
 using System.IO;
+using Unity.Collections;
 
 namespace mmc
 {
