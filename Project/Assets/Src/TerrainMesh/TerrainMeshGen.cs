@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Mathematics;
 
 namespace mmc
 {
@@ -22,8 +23,7 @@ namespace mmc
         [System.Serializable]
         public struct OutParam_t
         {
-            public List<Mathm.Line2D> MeshEdges;
-            public List<Vector2[]>    MeshLines;
+            public List<float3[]> MeshEdges;
         }
         public OutParam_t OutParam;
 
@@ -50,6 +50,23 @@ namespace mmc
                     Gizmos.DrawLine(
                         new Vector3(0, 0, InParam.MapOrigin.y + InParam.TileSize.y * y),
                         new Vector3(InParam.MapOrigin.x + InParam.MapLnegth.y, 0, InParam.MapOrigin.y + InParam.TileSize.y * y));
+                }
+            }
+
+            if (OutParam.MeshEdges != null)
+            {
+                for (var i = 0; i != OutParam.MeshEdges.Count; ++i)
+                {
+                    var edges = OutParam.MeshEdges[i];
+                    for (var j = 0; j != edges.Length - 1; ++j)
+                    {
+                        var a = edges[j    ];
+                        var b = edges[j + 1];
+                        Gizmos.DrawLine(a, b);
+                        Gizmos.DrawSphere(a, 1);
+                        Gizmos.DrawSphere(b, 1);
+                    }
+                    //break;
                 }
             }
         }
