@@ -66,7 +66,6 @@ namespace mmc
                         Gizmos.DrawSphere(a, 1);
                         Gizmos.DrawSphere(b, 1);
                     }
-                    //break;
                 }
             }
         }
