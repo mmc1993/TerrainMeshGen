@@ -14,12 +14,12 @@ namespace mmc
     {
         static class JobHelper
         {
-            private static bool Float3Equals(float3 a, float3 b)
+            private static bool Float3Equals(float3 a, float3 b, float radius = math.EPSILON)
             {
                 var diff = math.abs(a - b);
-                return diff.x < math.EPSILON
-                    && diff.y < math.EPSILON
-                    && diff.z < math.EPSILON;
+                return diff.x < radius
+                    && diff.y < radius
+                    && diff.z < radius;
             }
 
             private static bool FindHeadByEdge(ref UnsafeList<float3> list, int origin, out int result)
@@ -72,13 +72,13 @@ namespace mmc
             public struct JobCutedgeJoin : IJobParallelFor
             {
                 [ReadOnly]
-                public NativeArray<UnsafeList<float3>> AllMeshEdge;
+                public NativeArray<UnsafeList<float3>> InMeshEdges;
 
+                [WriteOnly]
                 public NativeArray<(
                     UnsafeList<float3>,
                     UnsafeList<float3>,
-                    UnsafeList<float3>
-                    )> OutMeshEdge;
+                    UnsafeList<float3>)> OutCutlines;
 
                 public void Execute(int index)
                 {
@@ -88,25 +88,25 @@ namespace mmc
                     UnsafeList<float3> outList0 = new(1, Allocator.TempJob);
                     UnsafeList<float3> outList1 = new(1, Allocator.TempJob);
                     UnsafeList<float3> outList2 = new(1, Allocator.TempJob);
-                    var allMeshEdge = AllMeshEdge[index];
-                    for (var i = 0; i != allMeshEdge.Length; i += 2)
+                    var meshEdges = InMeshEdges[index];
+                    for (var i = 0; i != meshEdges.Length; i += 2)
                     {
-                        if (FindHeadByEdge(ref allMeshEdge, i, out var headIndex))
+                        if (FindHeadByEdge(ref meshEdges, i, out var headIndex))
                         {
                             if (outHead0 == -1)
                             {
                                 outHead0 = headIndex;
-                                FillLinkByEdge(ref allMeshEdge, headIndex, ref outList0);
+                                FillLinkByEdge(ref meshEdges, headIndex, ref outList0);
                             }
                             else if (outHead1 == -1 && outHead0 != headIndex)
                             {
                                 outHead1 = headIndex;
-                                FillLinkByEdge(ref allMeshEdge, headIndex, ref outList1);
+                                FillLinkByEdge(ref meshEdges, headIndex, ref outList1);
                             }
                             else if (outHead2 == -1 && outHead0 != headIndex && outHead1 != headIndex)
                             {
                                 outHead2 = headIndex;
-                                FillLinkByEdge(ref allMeshEdge, headIndex, ref outList2);
+                                FillLinkByEdge(ref meshEdges, headIndex, ref outList2);
                             }
 
                             if (outHead0 != -1 && outHead1 != -1 && outHead2 != -1)
@@ -116,10 +116,93 @@ namespace mmc
                         }
                         else
                         {
-                            FillLinkByEdge(ref allMeshEdge, headIndex, ref outList0); break;
+                            FillLinkByEdge(ref meshEdges, headIndex, ref outList0); break;
                         }
                     }
-                    OutMeshEdge[index] = (outList0, outList1, outList2);
+                    OutCutlines[index] = (outList0, outList1, outList2);
+                }
+            }
+
+            private static bool FindHeadByLine(ref NativeArray<UnsafeList<float3>> list, int origin, out int result)
+            {
+                var exit = false;
+                var ring = false;
+                var curr = origin;
+                var ringEnd = list[origin][^1];
+                while (!exit)
+                {
+                    exit = true;
+                    for (var i = 0; i != list.Length; ++i)
+                    {
+                        if (Float3Equals(list[curr][0], list[i][^1]))
+                        {
+                            ring = Float3Equals(list[i][0], ringEnd);
+                            if (!ring) { curr = i; exit = false; }
+                            break;
+                        }
+                    }
+                }
+                result = curr;
+                return !ring;
+            }
+
+            private static void FillLinkByLine(ref NativeArray<UnsafeList<float3>> list, int origin, ref UnsafeList<float3> result)
+            {
+                var curr = origin;
+                result.AddRange(list[origin]);
+                for (var exit = false; !exit;)
+                {
+                    exit = true;
+                    for (var i = 0; i != list.Length; ++i)
+                    {
+                        if (i == curr) { continue; }
+
+                        var ipt = list[i][^1];
+                        if (Float3Equals(list[curr][^1], list[i][0]))
+                        {
+                            exit = Float3Equals(ipt, list[origin][0]);
+                            for (var j = 1; j != list[i].Length; ++j)
+                            {
+                                result.Add(list[i][j]);
+                            }
+                            curr = i; break;
+                        }
+                    }
+                }
+            }
+
+            //  Éú³ÉMesh±ßÔµ
+            public struct JobCutlineJoin0 : IJobParallelFor
+            {
+                private static readonly object sLockMutex = new();
+
+                [ReadOnly]
+                public NativeArray<UnsafeList<float3>> InCutlines;
+                [WriteOnly]
+                public NativeHashSet<int> OutHeadIndexs;
+
+                public void Execute(int index)
+                {
+                    FindHeadByLine(ref InCutlines, index, out int result);
+
+                    lock (sLockMutex) { OutHeadIndexs.Add(result); }
+                }
+            }
+
+            public struct JobCutlineJoin1 : IJobParallelFor
+            {
+                [ReadOnly]
+                public NativeArray<UnsafeList<float3>> InCutlines;
+                [ReadOnly]
+                public NativeArray<int> InHeadIndexs;
+                [WriteOnly]
+                public NativeArray<UnsafeList<float3>> OutCutlines;
+
+                public void Execute(int index)
+                {
+                    var list = new UnsafeList<float3>(1, Allocator.TempJob);
+                    FillLinkByLine(ref InCutlines, InHeadIndexs[index], ref list);
+                    OutCutlines[index] = list;
                 }
             }
         }
@@ -181,9 +264,10 @@ namespace mmc
 
             new JobHelper.JobCutedgeJoin()
             {
-                AllMeshEdge = allMeshEdge,
-                OutMeshEdge = outMeshEdge,
+                InMeshEdges = allMeshEdge,
+                OutCutlines = outMeshEdge,
             }.Schedule(allMeshEdge.Length, 64).Complete();
+
 
             //  copy
             Target.OutParam.MeshEdges = new();
