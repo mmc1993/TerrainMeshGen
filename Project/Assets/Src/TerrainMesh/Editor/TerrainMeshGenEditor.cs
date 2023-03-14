@@ -28,7 +28,7 @@ namespace mmc
                     && diff.z < radius;
             }
 
-            public struct JobCombineCutedge0 : IJobParallelFor
+            public struct JobCombinePair : IJobParallelFor
             {
                 [ReadOnly]
                 public NativeArray<UnsafeList<Float3Pair>> InCutlines;
@@ -43,24 +43,24 @@ namespace mmc
                     var cutlines = InCutlines[index];
                     for (var i = 0; i != cutlines.Length; ++i)
                     {
-                        var headIndex = FindCutline(ref cutlines, i);
+                        var headIndex = Find(ref cutlines, i);
                         if (headIndex == -1)
                         {
                             var list = new UnsafeList<float3>(1, Allocator.TempJob);
-                            LinkCutline(ref cutlines, i, ref list);
+                            Link(ref cutlines,  i, ref list);
                             OutCutlines.Enqueue(list); break;
                         }
                         else if (!headUnique.Contains(headIndex))
                         {
                             var list = new UnsafeList<float3>(1, Allocator.TempJob);
-                            LinkCutline(ref cutlines, headIndex, ref list);
+                            Link(ref cutlines, headIndex, ref list);
                             OutCutlines.Enqueue(list);
                             headUnique.Add(headIndex);
                         }
                     }
                 }
 
-                private int FindCutline(ref UnsafeList<Float3Pair> list, int origin)
+                private int Find(ref UnsafeList<Float3Pair> list, int origin)
                 {
                     var exit = false;
                     var ring = false;
@@ -82,7 +82,7 @@ namespace mmc
                     return ring ? -1 : curr;
                 }
 
-                private void LinkCutline(ref UnsafeList<Float3Pair> list, int origin, ref UnsafeList<float3> result)
+                private void Link(ref UnsafeList<Float3Pair> list, int origin, ref UnsafeList<float3> result)
                 {
                     var curr = origin;
                     result.Add(list[origin].P0);
@@ -252,7 +252,7 @@ namespace mmc
         private NativeArray<UnsafeList<float3>> CombineCutline1(ref NativeArray<UnsafeList<Float3Pair>> cutlines)
         {
             var queue = new NativeQueue<UnsafeList<float3>>(Allocator.TempJob);
-            new JobHelper.JobCombineCutedge0()
+            new JobHelper.JobCombinePair()
             {
                 InCutlines  = cutlines,
                 OutCutlines = queue.AsParallelWriter(),
