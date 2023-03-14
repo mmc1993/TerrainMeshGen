@@ -28,100 +28,81 @@ namespace mmc
                     && diff.z < radius;
             }
 
-            private static bool FindCutline0(ref UnsafeList<Float3Pair> list, int origin, out int result)
-            {
-                var exit = false;
-                var ring = false;
-                var curr = origin;
-                var ringEnd = list[origin].P1;
-                while (!exit)
-                {
-                    exit = true;
-                    for (var i = 0; i != list.Length; ++i)
-                    {
-                        if (F3Equals(list[curr].P0, list[i].P1))
-                        {
-                            ring = F3Equals(list[i].P0, ringEnd);
-                            if (!ring) { curr = i; exit = false; }
-                            break;
-                        }
-                    }
-                }
-                result = curr;
-                return !ring;
-            }
-
-            private static void LinkCutline0(ref UnsafeList<Float3Pair> list, int origin, ref UnsafeList<float3> result)
-            {
-                var curr = origin;
-                result.Add(list[origin].P0);
-                result.Add(list[origin].P1);
-                for (var exit = false; !exit;)
-                {
-                    exit = true;
-                    for (var i = 0; i != list.Length; ++i)
-                    {
-                        if (i == curr) { continue; }
-
-                        var pt = list[i].P1;
-                        if (F3Equals(list[curr].P1, list[i].P0))
-                        {
-                            exit = F3Equals(pt,list[origin].P0);
-                            result.Add(pt);
-                            curr = i;break;
-                        }
-                    }
-                }
-            }
-
             public struct JobCombineCutedge0 : IJobParallelFor
             {
                 [ReadOnly]
                 public NativeArray<UnsafeList<Float3Pair>> InCutlines;
 
                 [WriteOnly]
-                public NativeArray<(
-                    UnsafeList<float3>,
-                    UnsafeList<float3>,
-                    UnsafeList<float3>)> OutCutlines;
+                public NativeQueue<UnsafeList<float3>>.ParallelWriter OutCutlines;
 
                 public void Execute(int index)
                 {
-                    var outHead0 = -1;
-                    var outHead1 = -1;
-                    var outHead2 = -1;
-                    UnsafeList<float3> outList0 = new(1, Allocator.TempJob);
-                    UnsafeList<float3> outList1 = new(1, Allocator.TempJob);
-                    UnsafeList<float3> outList2 = new(1, Allocator.TempJob);
-                    var meshEdges = InCutlines[index];
-                    for (var i = 0; i != meshEdges.Length; ++i)
-                    {
-                        if (FindCutline0(ref meshEdges, i, out var headIndex))
-                        {
-                            if (outHead0 == -1)
-                            {
-                                outHead0 = headIndex;
-                                LinkCutline0(ref meshEdges, headIndex, ref outList0);
-                            }
-                            else if (outHead1 == -1 && outHead0 != headIndex)
-                            {
-                                outHead1 = headIndex;
-                                LinkCutline0(ref meshEdges, headIndex, ref outList1);
-                            }
-                            else if (outHead2 == -1 && outHead0 != headIndex && outHead1 != headIndex)
-                            {
-                                outHead2 = headIndex;
-                                LinkCutline0(ref meshEdges, headIndex, ref outList2);
-                            }
+                    using var headUnique = new NativeHashSet<int>(4, Allocator.Temp);
 
-                            if (outHead0 != -1 && outHead1 != -1 && outHead2 != -1) { break; }
-                        }
-                        else
+                    var cutlines = InCutlines[index];
+                    for (var i = 0; i != cutlines.Length; ++i)
+                    {
+                        var headIndex = FindCutline(ref cutlines, i);
+                        if (headIndex == -1)
                         {
-                            LinkCutline0(ref meshEdges, headIndex, ref outList0); break;
+                            var list = new UnsafeList<float3>(1, Allocator.TempJob);
+                            LinkCutline(ref cutlines, i, ref list);
+                            OutCutlines.Enqueue(list); break;
+                        }
+                        else if (!headUnique.Contains(headIndex))
+                        {
+                            var list = new UnsafeList<float3>(1, Allocator.TempJob);
+                            LinkCutline(ref cutlines, headIndex, ref list);
+                            OutCutlines.Enqueue(list);
+                            headUnique.Add(headIndex);
                         }
                     }
-                    OutCutlines[index] = (outList0, outList1, outList2);
+                }
+
+                private int FindCutline(ref UnsafeList<Float3Pair> list, int origin)
+                {
+                    var exit = false;
+                    var ring = false;
+                    var curr = origin;
+                    var ringEnd = list[origin].P1;
+                    while (!exit)
+                    {
+                        exit = true;
+                        for (var i = 0; i != list.Length; ++i)
+                        {
+                            if (F3Equals(list[curr].P0, list[i].P1))
+                            {
+                                ring = F3Equals(list[i].P0, ringEnd);
+                                if (!ring) { curr = i; exit = false; }
+                                break;
+                            }
+                        }
+                    }
+                    return ring ? -1 : curr;
+                }
+
+                private void LinkCutline(ref UnsafeList<Float3Pair> list, int origin, ref UnsafeList<float3> result)
+                {
+                    var curr = origin;
+                    result.Add(list[origin].P0);
+                    result.Add(list[origin].P1);
+                    for (var exit = false; !exit;)
+                    {
+                        exit = true;
+                        for (var i = 0; i != list.Length; ++i)
+                        {
+                            if (i == curr) { continue; }
+
+                            var pt = list[i].P1;
+                            if (F3Equals(list[curr].P1, list[i].P0))
+                            {
+                                exit = F3Equals(pt,list[origin].P0);
+                                result.Add(pt);
+                                curr = i;break;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -268,24 +249,17 @@ namespace mmc
             return result.ToArray(Allocator.TempJob);
         }
 
-        private NativeArray<(
-            UnsafeList<float3>,
-            UnsafeList<float3>,
-            UnsafeList<float3>)> CombineCutline1(ref NativeArray<UnsafeList<Float3Pair>> cutlines0)
+        private NativeArray<UnsafeList<float3>> CombineCutline1(ref NativeArray<UnsafeList<Float3Pair>> cutlines)
         {
-            var cutlines1 = new NativeArray<(
-                UnsafeList<float3>,
-                UnsafeList<float3>,
-                UnsafeList<float3>
-            )>(cutlines0.Length, Allocator.TempJob);
-
+            var queue = new NativeQueue<UnsafeList<float3>>(Allocator.TempJob);
             new JobHelper.JobCombineCutedge0()
             {
-                InCutlines  = cutlines0,
-                OutCutlines = cutlines1,
-            }.Schedule(cutlines0.Length, 64).Complete();
-
-            return cutlines1;
+                InCutlines  = cutlines,
+                OutCutlines = queue.AsParallelWriter(),
+            }.Schedule(cutlines.Length, 64).Complete();
+            var ret = queue.ToArray(Allocator.TempJob);
+            queue.Dispose();
+            return ret;
         }
 
         private void GenMeshEdge()
@@ -298,39 +272,16 @@ namespace mmc
             Target.OutParam.MeshEdges = new();
             for (var i = 0; i != cutlines1.Length; ++i)
             {
-                if (cutlines1[i].Item1.Length != 0)
+                var genEdge = new float3[cutlines1[i].Length];
+                for (var j = 0; j != cutlines1[i].Length; ++j)
                 {
-                    var genEdge = new float3[cutlines1[i].Item1.Length];
-                    for (var j = 0; j != cutlines1[i].Item1.Length; ++j)
-                    {
-                        genEdge[j] = cutlines1[i].Item1[j];
-                    }
-                    Target.OutParam.MeshEdges.Add(genEdge);
+                    genEdge[j] = cutlines1[i][j];
                 }
-
-                if (cutlines1[i].Item2.Length != 0)
-                {
-                    var genEdge = new float3[cutlines1[i].Item2.Length];
-                    for (var j = 0; j != cutlines1[i].Item2.Length; ++j)
-                    {
-                        genEdge[j] = cutlines1[i].Item2[j];
-                    }
-                    Target.OutParam.MeshEdges.Add(genEdge);
-                }
-
-                if (cutlines1[i].Item3.Length != 0)
-                {
-                    var genEdge = new float3[cutlines1[i].Item3.Length];
-                    for (var j = 0; j != cutlines1[i].Item3.Length; ++j)
-                    {
-                        genEdge[j] = cutlines1[i].Item3[j];
-                    }
-                    Target.OutParam.MeshEdges.Add(genEdge);
-                }
+                Target.OutParam.MeshEdges.Add(genEdge);
             }
 
             //  Dispose
-            for (var i = 0; i != cutlines1.Length; ++i)
+            for (var i = 0; i != cutlines0.Length; ++i)
             {
                 cutlines0[i].Dispose();
             }
@@ -338,9 +289,7 @@ namespace mmc
 
             for (var i = 0; i != cutlines1.Length; ++i)
             {
-                cutlines1[i].Item1.Dispose();
-                cutlines1[i].Item2.Dispose();
-                cutlines1[i].Item3.Dispose();
+                cutlines1[i].Dispose();
             }
             cutlines1.Dispose();
         }
