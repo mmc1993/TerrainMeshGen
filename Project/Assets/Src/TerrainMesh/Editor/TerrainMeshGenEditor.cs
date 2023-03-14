@@ -12,9 +12,15 @@ namespace mmc
     [CustomEditor(typeof(TerrainMeshGen))]
     public class TerrainMeshGenEditor : Editor
     {
+        struct Float3Pair
+        {
+            public float3 P0;
+            public float3 P1;
+        }
+
         static class JobHelper
         {
-            private static bool Float3Equals(float3 a, float3 b, float radius = math.EPSILON)
+            private static bool F3Equals(float3 a, float3 b, float radius = math.EPSILON)
             {
                 var diff = math.abs(a - b);
                 return diff.x < radius
@@ -22,20 +28,20 @@ namespace mmc
                     && diff.z < radius;
             }
 
-            private static bool FindHeadByEdge(ref UnsafeList<float3> list, int origin, out int result)
+            private static bool FindCutline0(ref UnsafeList<Float3Pair> list, int origin, out int result)
             {
                 var exit = false;
                 var ring = false;
                 var curr = origin;
-                var ringEnd = list[origin + 1];
+                var ringEnd = list[origin].P1;
                 while (!exit)
                 {
                     exit = true;
-                    for (var i = 0; i != list.Length; i += 2)
+                    for (var i = 0; i != list.Length; ++i)
                     {
-                        if (Float3Equals(list[curr], list[i + 1]))
+                        if (F3Equals(list[curr].P0, list[i].P1))
                         {
-                            ring = Float3Equals(list[i], ringEnd);
+                            ring = F3Equals(list[i].P0, ringEnd);
                             if (!ring) { curr = i; exit = false; }
                             break;
                         }
@@ -45,34 +51,33 @@ namespace mmc
                 return !ring;
             }
 
-            private static void FillLinkByEdge(ref UnsafeList<float3> list, int origin, ref UnsafeList<float3> result)
+            private static void LinkCutline0(ref UnsafeList<Float3Pair> list, int origin, ref UnsafeList<float3> result)
             {
                 var curr = origin;
-                result.Add(list[origin    ]);
-                result.Add(list[origin + 1]);
+                result.Add(list[origin].P0);
+                result.Add(list[origin].P1);
                 for (var exit = false; !exit;)
                 {
                     exit = true;
-                    for (var i = 0; i != list.Length; i += 2)
+                    for (var i = 0; i != list.Length; ++i)
                     {
                         if (i == curr) { continue; }
 
-                        var ipt = list[i + 1];
-                        if (Float3Equals(list[curr + 1], list[i]))
+                        var pt = list[i].P1;
+                        if (F3Equals(list[curr].P1, list[i].P0))
                         {
-                            exit = Float3Equals(ipt, list[origin]);
-                            result.Add(ipt);
-                            curr = i; break;
+                            exit = F3Equals(pt,list[origin].P0);
+                            result.Add(pt);
+                            curr = i;break;
                         }
                     }
                 }
             }
 
-            //  生成Mesh边缘
-            public struct JobCutedgeJoin : IJobParallelFor
+            public struct JobCombineCutedge0 : IJobParallelFor
             {
                 [ReadOnly]
-                public NativeArray<UnsafeList<float3>> InMeshEdges;
+                public NativeArray<UnsafeList<Float3Pair>> InCutlines;
 
                 [WriteOnly]
                 public NativeArray<(
@@ -88,42 +93,39 @@ namespace mmc
                     UnsafeList<float3> outList0 = new(1, Allocator.TempJob);
                     UnsafeList<float3> outList1 = new(1, Allocator.TempJob);
                     UnsafeList<float3> outList2 = new(1, Allocator.TempJob);
-                    var meshEdges = InMeshEdges[index];
-                    for (var i = 0; i != meshEdges.Length; i += 2)
+                    var meshEdges = InCutlines[index];
+                    for (var i = 0; i != meshEdges.Length; ++i)
                     {
-                        if (FindHeadByEdge(ref meshEdges, i, out var headIndex))
+                        if (FindCutline0(ref meshEdges, i, out var headIndex))
                         {
                             if (outHead0 == -1)
                             {
                                 outHead0 = headIndex;
-                                FillLinkByEdge(ref meshEdges, headIndex, ref outList0);
+                                LinkCutline0(ref meshEdges, headIndex, ref outList0);
                             }
                             else if (outHead1 == -1 && outHead0 != headIndex)
                             {
                                 outHead1 = headIndex;
-                                FillLinkByEdge(ref meshEdges, headIndex, ref outList1);
+                                LinkCutline0(ref meshEdges, headIndex, ref outList1);
                             }
                             else if (outHead2 == -1 && outHead0 != headIndex && outHead1 != headIndex)
                             {
                                 outHead2 = headIndex;
-                                FillLinkByEdge(ref meshEdges, headIndex, ref outList2);
+                                LinkCutline0(ref meshEdges, headIndex, ref outList2);
                             }
 
-                            if (outHead0 != -1 && outHead1 != -1 && outHead2 != -1)
-                            {
-                                break;
-                            }
+                            if (outHead0 != -1 && outHead1 != -1 && outHead2 != -1) { break; }
                         }
                         else
                         {
-                            FillLinkByEdge(ref meshEdges, headIndex, ref outList0); break;
+                            LinkCutline0(ref meshEdges, headIndex, ref outList0); break;
                         }
                     }
                     OutCutlines[index] = (outList0, outList1, outList2);
                 }
             }
 
-            private static bool FindHeadByLine(ref NativeArray<UnsafeList<float3>> list, int origin, out int result)
+            private static bool FindCutline1(ref NativeArray<UnsafeList<float3>> list, int origin, out int result)
             {
                 var exit = false;
                 var ring = false;
@@ -134,9 +136,9 @@ namespace mmc
                     exit = true;
                     for (var i = 0; i != list.Length; ++i)
                     {
-                        if (Float3Equals(list[curr][0], list[i][^1]))
+                        if (F3Equals(list[curr][0], list[i][^1]))
                         {
-                            ring = Float3Equals(list[i][0], ringEnd);
+                            ring = F3Equals(list[i][0], ringEnd);
                             if (!ring) { curr = i; exit = false; }
                             break;
                         }
@@ -146,7 +148,7 @@ namespace mmc
                 return !ring;
             }
 
-            private static void FillLinkByLine(ref NativeArray<UnsafeList<float3>> list, int origin, ref UnsafeList<float3> result)
+            private static void LinkCutline1(ref NativeArray<UnsafeList<float3>> list, int origin, ref UnsafeList<float3> result)
             {
                 var curr = origin;
                 result.AddRange(list[origin]);
@@ -158,9 +160,9 @@ namespace mmc
                         if (i == curr) { continue; }
 
                         var ipt = list[i][^1];
-                        if (Float3Equals(list[curr][^1], list[i][0]))
+                        if (F3Equals(list[curr][^1], list[i][0]))
                         {
-                            exit = Float3Equals(ipt, list[origin][0]);
+                            exit = F3Equals(ipt, list[origin][0]);
                             for (var j = 1; j != list[i].Length; ++j)
                             {
                                 result.Add(list[i][j]);
@@ -172,7 +174,7 @@ namespace mmc
             }
 
             //  生成Mesh边缘
-            public struct JobCutlineJoin0 : IJobParallelFor
+            public struct JobCombineCutline1 : IJobParallelFor
             {
                 private static readonly object sLockMutex = new();
 
@@ -183,7 +185,7 @@ namespace mmc
 
                 public void Execute(int index)
                 {
-                    FindHeadByLine(ref InCutlines, index, out int result);
+                    FindCutline1(ref InCutlines, index, out int result);
 
                     lock (sLockMutex) { OutHeadIndexs.Add(result); }
                 }
@@ -201,7 +203,7 @@ namespace mmc
                 public void Execute(int index)
                 {
                     var list = new UnsafeList<float3>(1, Allocator.TempJob);
-                    FillLinkByLine(ref InCutlines, InHeadIndexs[index], ref list);
+                    LinkCutline1(ref InCutlines, InHeadIndexs[index], ref list);
                     OutCutlines[index] = list;
                 }
             }
@@ -219,19 +221,18 @@ namespace mmc
             }
         }
 
-        private void GenMeshEdge()
+        private NativeArray<UnsafeList<Float3Pair>> CombineCutline0()
         {
             var meshFilters = CollectMeshFilters(Target.InParam.RootModels);
-            var allMeshEdge = new NativeArray<UnsafeList<float3>>(meshFilters.Length,
-                                                                  Allocator.TempJob);
+            using var result = new NativeQueue<UnsafeList<Float3Pair>>(Allocator.TempJob);
             for (var i = 0; i != meshFilters.Length; ++i)
             {
                 var meshFilter = meshFilters[i];
                 var vertColors = meshFilter.sharedMesh.colors32;
                 var vertPoints = meshFilter.sharedMesh.vertices;
                 var triangles = meshFilter.sharedMesh.triangles;
-                Debug.Assert(triangles.Length % 3 == 0);
-                var edges = new UnsafeList<float3>(1, Allocator.TempJob);
+
+                var pairs = new UnsafeList<Float3Pair>(1, Allocator.TempJob);
                 for (var j = 0; j != triangles.Length; j += 3)
                 {
                     var aIndex = triangles[j];
@@ -239,85 +240,109 @@ namespace mmc
                     var cIndex = triangles[(j + 2) % triangles.Length];
                     if (Mathm.Color32Equal(vertColors[aIndex], Target.InParam.EdgeColor) && Mathm.Color32Equal(vertColors[bIndex], Target.InParam.EdgeColor))
                     {
-                        edges.Add(meshFilter.transform.TransformPoint(vertPoints[aIndex]));
-                        edges.Add(meshFilter.transform.TransformPoint(vertPoints[bIndex]));
+                        pairs.Add(new Float3Pair
+                        {
+                            P0 = meshFilter.transform.TransformPoint(vertPoints[aIndex]),
+                            P1 = meshFilter.transform.TransformPoint(vertPoints[bIndex]),
+                        });
                     }
                     if (Mathm.Color32Equal(vertColors[bIndex], Target.InParam.EdgeColor) && Mathm.Color32Equal(vertColors[cIndex], Target.InParam.EdgeColor))
                     {
-                        edges.Add(meshFilter.transform.TransformPoint(vertPoints[bIndex]));
-                        edges.Add(meshFilter.transform.TransformPoint(vertPoints[cIndex]));
+                        pairs.Add(new Float3Pair
+                        {
+                            P0 = meshFilter.transform.TransformPoint(vertPoints[bIndex]),
+                            P1 = meshFilter.transform.TransformPoint(vertPoints[cIndex]),
+                        });
                     }
                     if (Mathm.Color32Equal(vertColors[cIndex], Target.InParam.EdgeColor) && Mathm.Color32Equal(vertColors[aIndex], Target.InParam.EdgeColor))
                     {
-                        edges.Add(meshFilter.transform.TransformPoint(vertPoints[cIndex]));
-                        edges.Add(meshFilter.transform.TransformPoint(vertPoints[aIndex]));
+                        pairs.Add(new Float3Pair
+                        {
+                            P0 = meshFilter.transform.TransformPoint(vertPoints[cIndex]),
+                            P1 = meshFilter.transform.TransformPoint(vertPoints[aIndex]),
+                        });
                     }
                 }
-                allMeshEdge[i] = edges;
+                if (!pairs.IsEmpty) { result.Enqueue(pairs); }
             }
+            return result.ToArray(Allocator.TempJob);
+        }
 
-            var outMeshEdge = new NativeArray<(
+        private NativeArray<(
+            UnsafeList<float3>,
+            UnsafeList<float3>,
+            UnsafeList<float3>)> CombineCutline1(ref NativeArray<UnsafeList<Float3Pair>> cutlines0)
+        {
+            var cutlines1 = new NativeArray<(
                 UnsafeList<float3>,
                 UnsafeList<float3>,
                 UnsafeList<float3>
-            )>(allMeshEdge.Length, Allocator.TempJob);
+            )>(cutlines0.Length, Allocator.TempJob);
 
-            new JobHelper.JobCutedgeJoin()
+            new JobHelper.JobCombineCutedge0()
             {
-                InMeshEdges = allMeshEdge,
-                OutCutlines = outMeshEdge,
-            }.Schedule(allMeshEdge.Length, 64).Complete();
+                InCutlines  = cutlines0,
+                OutCutlines = cutlines1,
+            }.Schedule(cutlines0.Length, 64).Complete();
 
+            return cutlines1;
+        }
+
+        private void GenMeshEdge()
+        {
+            var cutlines0 = CombineCutline0();
+            var cutlines1 = CombineCutline1(ref cutlines0);
+            //var cutlines2 = CombineCutline2(ref cutlines1);
 
             //  copy
             Target.OutParam.MeshEdges = new();
-            for (var i = 0; i != outMeshEdge.Length; ++i)
+            for (var i = 0; i != cutlines1.Length; ++i)
             {
-                if (outMeshEdge[i].Item1.Length != 0)
+                if (cutlines1[i].Item1.Length != 0)
                 {
-                    var genEdge = new float3[outMeshEdge[i].Item1.Length];
-                    for (var j = 0; j != outMeshEdge[i].Item1.Length; ++j)
+                    var genEdge = new float3[cutlines1[i].Item1.Length];
+                    for (var j = 0; j != cutlines1[i].Item1.Length; ++j)
                     {
-                        genEdge[j] = outMeshEdge[i].Item1[j];
+                        genEdge[j] = cutlines1[i].Item1[j];
                     }
                     Target.OutParam.MeshEdges.Add(genEdge);
                 }
 
-                if (outMeshEdge[i].Item2.Length != 0)
+                if (cutlines1[i].Item2.Length != 0)
                 {
-                    var genEdge = new float3[outMeshEdge[i].Item2.Length];
-                    for (var j = 0; j != outMeshEdge[i].Item2.Length; ++j)
+                    var genEdge = new float3[cutlines1[i].Item2.Length];
+                    for (var j = 0; j != cutlines1[i].Item2.Length; ++j)
                     {
-                        genEdge[j] = outMeshEdge[i].Item2[j];
+                        genEdge[j] = cutlines1[i].Item2[j];
                     }
                     Target.OutParam.MeshEdges.Add(genEdge);
                 }
 
-                if (outMeshEdge[i].Item3.Length != 0)
+                if (cutlines1[i].Item3.Length != 0)
                 {
-                    var genEdge = new float3[outMeshEdge[i].Item3.Length];
-                    for (var j = 0; j != outMeshEdge[i].Item3.Length; ++j)
+                    var genEdge = new float3[cutlines1[i].Item3.Length];
+                    for (var j = 0; j != cutlines1[i].Item3.Length; ++j)
                     {
-                        genEdge[j] = outMeshEdge[i].Item3[j];
+                        genEdge[j] = cutlines1[i].Item3[j];
                     }
                     Target.OutParam.MeshEdges.Add(genEdge);
                 }
             }
 
             //  Dispose
-            for (var i = 0; i != outMeshEdge.Length; ++i)
+            for (var i = 0; i != cutlines1.Length; ++i)
             {
-                outMeshEdge[i].Item1.Dispose();
-                outMeshEdge[i].Item2.Dispose();
-                outMeshEdge[i].Item3.Dispose();
+                cutlines0[i].Dispose();
             }
-            outMeshEdge.Dispose();
+            cutlines0.Dispose();
 
-            for (var i = 0; i != allMeshEdge.Length; ++i)
+            for (var i = 0; i != cutlines1.Length; ++i)
             {
-                allMeshEdge[i].Dispose();
+                cutlines1[i].Item1.Dispose();
+                cutlines1[i].Item2.Dispose();
+                cutlines1[i].Item3.Dispose();
             }
-            allMeshEdge.Dispose();
+            cutlines1.Dispose();
         }
 
         private MeshFilter[] CollectMeshFilters(Transform root)
